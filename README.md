@@ -6,6 +6,8 @@
 
 **用户已确认 PW → bridge → Cockpit → 杆力链路接通。** bridge 只准备/估算并发送遥测，不计算或下发底座力矩。`payload/DCS.exe` 和 PW 独立预设已安装；预设参数沿用 AC7，当前仍需验证力感标定与停止行为。使用见 [P4 Cockpit 接入](development/P4-COCKPIT.md)，字段和强度差异说明见 [遥测与杆力](development/TELEMETRY-FORCE-NOTES.md)。
 
+新版会把原始输入与实际 TCP 写入的完整帧、时间和状态保存到 `payload/captures/session-*/`；启动显示绝对路径，结束请用 Ctrl+C 等待保存。自动联调已通过，尚未把它当成真实飞行/设备验收。详见 [实际发送帧采集](development/TELEMETRY-CAPTURE.md)。
+
 实施路线、阶段验收与持续进展统一维护在 [移植计划 PLAN.md](PLAN.md)。本页保留项目背景与静态线索；实施状态以计划文档为准。
 
 优先验证最短链路：

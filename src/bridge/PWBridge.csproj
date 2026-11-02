@@ -5,4 +5,17 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <Target Name="CaptureSourceHashes" BeforeTargets="GetAssemblyAttributes">
+    <ItemGroup>
+      <_CaptureSource Include="$(MSBuildProjectDirectory)/Program.cs;$(MSBuildProjectDirectory)/Sample.cs;$(MSBuildProjectDirectory)/FlightTelemetry.cs;$(MSBuildProjectDirectory)/CockpitOutput.cs;$(MSBuildProjectDirectory)/SessionCapture.cs" />
+    </ItemGroup>
+    <GetFileHash Files="@(_CaptureSource)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="_CaptureHashes" />
+    </GetFileHash>
+    <ItemGroup>
+      <AssemblyMetadata Include="SourceSha256.%(_CaptureHashes.Filename)">
+        <Value>%(_CaptureHashes.FileHash)</Value>
+      </AssemblyMetadata>
+    </ItemGroup>
+  </Target>
 </Project>

@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 
 static class SelfTest {
     static void Check(bool value, string message) { if (!value) throw new Exception("self-test: " + message); }
@@ -80,48 +81,129 @@ static class SelfTest {
             Near(Field(frame, "acc_z"), -1, .01, "banked lateral projection");
             await FramingTests();
             await CockpitTests();
-            Console.WriteLine("PASS: parser, SI velocity, resets, jumps, angle wrap, G projection, bounded pipe; TCP telemetry, stale/clear/shutdown, reconnect and port conflict");
+            await PipelineCaptureTest();
+            Console.WriteLine("PASS: telemetry math, pipe/TCP, raw-to-sent correlation, stale/shutdown recording, provenance, no-client detection; temporary captures cleaned");
         } finally { CultureInfo.CurrentCulture = culture; }
     }
 
     static async Task CockpitTests() {
-        using var output = new CockpitOutput(0); // Never bind Cockpit's actual discovery port in tests.
-        Check(output.Snapshot().Frame == FlightTelemetry.SafeFrame(), "initial TCP state");
-        bool conflict = false;
-        try { using var other = new CockpitOutput(output.Port); } catch (IOException) { conflict = true; }
-        Check(conflict, "port conflict must not pick a different endpoint");
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        Task service = output.Run(stop.Token);
-        var telemetry = new FlightTelemetry();
-        telemetry.Frame(At(1)); telemetry.Frame(At(2));
-        string active = telemetry.Frame(At(3));
+        string directory = Path.Combine(Path.GetTempPath(), "PWCapture-Test-" + Guid.NewGuid().ToString("N"));
         try {
-            using (var client = new TcpClient()) {
-                await client.ConnectAsync(IPAddress.Loopback, output.Port, stop.Token);
-                using var stream = client.GetStream();
-                await ReadUntil(stream, FlightTelemetry.SafeFrame());
-                output.Publish(active, true);
-                await ReadUntil(stream, active);
-                output.Clear();
-                Check(!output.Snapshot().Active, "clear TCP activity");
-                await ReadUntil(stream, FlightTelemetry.SafeFrame());
-                output.Publish(active, true);
-                await ReadUntil(stream, active);
-                await Task.Delay(550);
-                Check(!output.Snapshot().Active, "500ms TCP freshness gate");
-                await ReadUntil(stream, FlightTelemetry.SafeFrame());
+            await using (var capture = new SessionCapture(directory, "cockpit")) {
+                using var output = new CockpitOutput(0, capture); // Never bind Cockpit's discovery port in tests.
+                Check(output.Snapshot().Frame == FlightTelemetry.SafeFrame(), "initial TCP state");
+                bool conflict = false;
+                try { using var other = new CockpitOutput(output.Port); } catch (IOException) { conflict = true; }
+                Check(conflict, "port conflict must not pick a different endpoint");
+                using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                Task service = output.Run(stop.Token);
+                var telemetry = new FlightTelemetry();
+                capture.Connected(1);
+                for (int q = 1; q <= 3; q++) capture.Input(Wire(q), At(q), 1, capture.Now);
+                telemetry.Frame(At(1)); telemetry.Frame(At(2));
+                string active = telemetry.Frame(At(3));
+                try {
+                    using (var client = new TcpClient()) {
+                        await client.ConnectAsync(IPAddress.Loopback, output.Port, stop.Token);
+                        using var stream = client.GetStream();
+                        await ReadUntil(stream, FlightTelemetry.SafeFrame());
+                        output.Publish(active, true, 3, At(3), "ok");
+                        await ReadUntil(stream, active);
+                        output.Clear("test_clear");
+                        Check(!output.Snapshot().Active, "clear TCP activity");
+                        await ReadUntil(stream, FlightTelemetry.SafeFrame());
+                        output.Publish(active, true, 3, At(3), "ok");
+                        await ReadUntil(stream, active);
+                        await Task.Delay(550);
+                        Check(!output.Snapshot().Active, "500ms TCP freshness gate");
+                        await ReadUntil(stream, FlightTelemetry.SafeFrame());
+                    }
+                    using var reconnected = new TcpClient();
+                    await reconnected.ConnectAsync(IPAddress.Loopback, output.Port, stop.Token);
+                    output.Publish(active, true, 3, At(3), "ok");
+                    using var next = reconnected.GetStream();
+                    await ReadUntil(next, active);
+                    stop.Cancel();
+                    await ReadUntil(next, FlightTelemetry.SafeFrame());
+                } finally {
+                    stop.Cancel();
+                    try { await service; } catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+                    capture.Boundary(1, "test_complete");
+                }
             }
-            using var reconnected = new TcpClient();
-            await reconnected.ConnectAsync(IPAddress.Loopback, output.Port, stop.Token);
-            output.Publish(active, true);
-            using var next = reconnected.GetStream();
-            await ReadUntil(next, active);
-            stop.Cancel();
-            await ReadUntil(next, FlightTelemetry.SafeFrame());
-        } finally {
-            stop.Cancel();
-            try { await service; } catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
-        }
+            var raw = File.ReadAllLines(Path.Combine(directory, "raw.jsonl"))
+                .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+            var frames = File.ReadAllLines(Path.Combine(directory, "frames.jsonl"))
+                .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+            Check(raw.Length == 3 && raw[2].GetProperty("input_id").GetInt64() == 3, "raw input IDs");
+            Check(raw[2].GetProperty("raw").GetString() == Wire(3), "raw bytes preserved");
+            var activeFrames = frames.Where(f => f.GetProperty("active").GetBoolean()).ToArray();
+            Check(activeFrames.Length > 1, "duplicate sends retained, not recomputed");
+            foreach (var frame in activeFrames) {
+                Check(frame.GetProperty("input_id").GetInt64() == 3 && frame.GetProperty("source_seq").GetInt64() == 3, "sent/source identity");
+                Near(frame.GetProperty("sample_game_t").GetDouble(), .06, 1e-9, "sent/source clock");
+                Check(frame.GetProperty("write_started_s").GetDouble() >= raw[2].GetProperty("received_s").GetDouble(), "shared monotonic clock");
+                Check(frame.GetProperty("frame").GetString()!.Contains("tas,100;", StringComparison.Ordinal), "actual frame text");
+            }
+            Check(frames.Any(f => f.GetProperty("reason").GetString() == "stale" && !f.GetProperty("active").GetBoolean()), "stale output recorded");
+            Check(frames.Any(f => f.GetProperty("reason").GetString() == "tcp_final_neutral"), "final neutral recorded");
+            var summary = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(directory, "summary.json")));
+            Check(summary.GetProperty("complete").GetBoolean() && summary.GetProperty("dropped").GetInt64() == 0, "capture integrity");
+            Check(summary.GetProperty("valid_sent").GetInt64() > 0, "active TCP output observed");
+            var metadata = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(directory, "metadata.json")));
+            Check(metadata.GetProperty("source_sha256").TryGetProperty("FlightTelemetry", out var hash) && hash.GetString()!.Length == 64, "compiled source provenance");
+            Check(metadata.GetProperty("program_sha256").GetString() == metadata.GetProperty("archived_sha256").GetString(), "archived program identity");
+            Check(File.ReadAllLines(Path.Combine(directory, "capture.txt")).Last() == "none", "legacy replay boundary");
+            bool refused = false;
+            try { await using var duplicate = new SessionCapture(directory, "cockpit"); } catch (IOException) { refused = true; }
+            Check(refused, "must not overwrite old capture files");
+            string noClient = Path.Combine(directory, "no-client");
+            await using (var capture = new SessionCapture(noClient, "cockpit")) capture.Input(Wire(), At(1), 1, capture.Now);
+            var idle = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(noClient, "summary.json")));
+            Check(!idle.GetProperty("has_active_tcp_output").GetBoolean(), "input-only capture must not count as sent data");
+        } finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    static async Task PipelineCaptureTest() {
+        string directory = Path.Combine(Path.GetTempPath(), "PWPipeline-Test-" + Guid.NewGuid().ToString("N"));
+        try {
+            await using (var capture = new SessionCapture(directory, "cockpit")) {
+                using var output = new CockpitOutput(0, capture);
+                using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                string pipeName = "PWPipeline-" + Guid.NewGuid().ToString("N");
+                Task receiver = Program.Receive(stop.Token, output, capture, pipeName);
+                Task sender = output.Run(stop.Token);
+                try {
+                    using var cockpit = new TcpClient();
+                    await cockpit.ConnectAsync(IPAddress.Loopback, output.Port, stop.Token);
+                    using var network = cockpit.GetStream();
+                    var telemetry = new FlightTelemetry();
+                    telemetry.Frame(At(1)); telemetry.Frame(At(2));
+                    string expected = telemetry.Frame(At(3));
+                    using (var source = new NamedPipeClientStream(".", pipeName, PipeDirection.Out, PipeOptions.Asynchronous)) {
+                        await source.ConnectAsync(stop.Token);
+                        using var writer = new StreamWriter(source, Encoding.ASCII, 4096, leaveOpen: true) { AutoFlush = true };
+                        for (int q = 1; q <= 3; q++) await writer.WriteLineAsync(Wire(q).AsMemory(), stop.Token);
+                        await ReadUntil(network, expected);
+                        Check(output.Snapshot().InputId == 3 && output.Snapshot().Source?.Seq == 3, "live receiver source correlation");
+                    }
+                    await ReadUntil(network, FlightTelemetry.SafeFrame());
+                } finally {
+                    stop.Cancel();
+                    try { await Task.WhenAll(receiver, sender); }
+                    catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+                }
+            }
+            var raw = File.ReadAllLines(Path.Combine(directory, "raw.jsonl"));
+            var frames = File.ReadAllLines(Path.Combine(directory, "frames.jsonl"))
+                .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+            Check(raw.Length == 3, "live pipeline input recording");
+            Check(frames.Any(f => f.GetProperty("active").GetBoolean() &&
+                f.GetProperty("input_id").GetInt64() == 3 && f.GetProperty("source_seq").GetInt64() == 3 &&
+                f.GetProperty("write_status").GetString() == "succeeded"), "live socket frame recorded after successful write");
+            var summary = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(directory, "summary.json")));
+            Check(summary.GetProperty("complete").GetBoolean() && summary.GetProperty("valid_sent").GetInt64() > 0, "live pipeline capture complete");
+        } finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
     static async Task ReadUntil(NetworkStream stream, string expected) {
