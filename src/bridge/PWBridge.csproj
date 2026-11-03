@@ -5,9 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <ItemGroup Condition="'$(NativeFeedbackDll)' != ''">
+    <EmbeddedResource Include="$(NativeFeedbackDll)" LogicalName="PWNativeFeedback.dll" />
+  </ItemGroup>
   <Target Name="CaptureSourceHashes" BeforeTargets="GetAssemblyAttributes">
     <ItemGroup>
-      <_CaptureSource Include="$(MSBuildProjectDirectory)/Program.cs;$(MSBuildProjectDirectory)/Sample.cs;$(MSBuildProjectDirectory)/FlightTelemetry.cs;$(MSBuildProjectDirectory)/CockpitOutput.cs;$(MSBuildProjectDirectory)/SessionCapture.cs" />
+      <_CaptureSource Include="$(MSBuildProjectDirectory)/Program.cs;$(MSBuildProjectDirectory)/Sample.cs;$(MSBuildProjectDirectory)/FlightTelemetry.cs;$(MSBuildProjectDirectory)/CockpitOutput.cs;$(MSBuildProjectDirectory)/SessionCapture.cs;$(MSBuildProjectDirectory)/NativeFeedback.cs;$(MSBuildProjectDirectory)/FeedbackEvents.cs" />
     </ItemGroup>
     <GetFileHash Files="@(_CaptureSource)" Algorithm="SHA256">
       <Output TaskParameter="Items" ItemName="_CaptureHashes" />

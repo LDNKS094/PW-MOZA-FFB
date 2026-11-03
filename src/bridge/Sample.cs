@@ -5,6 +5,7 @@ sealed record Sample(long Session, long Seq, double T, double RealT,
     double X, double Y, double Z, double Pitch, double Yaw, double Roll, double Forward) {
     static readonly string[] Keys = ["v", "s", "q", "t", "rt", "x", "y", "z", "p", "yaw", "r", "spd", "hp", "dead"];
     public const int MaxLine = 2048;
+    public double Health { get; init; } = double.NaN;
     public bool Valid => Session > 0 && Seq > 0 && T >= 0 && RealT >= 0 &&
         new[] { T, RealT, X, Y, Z, Pitch, Yaw, Roll, Forward }.All(double.IsFinite) &&
         T < 1e9 && RealT < 1e9 && Math.Max(Math.Abs(X), Math.Max(Math.Abs(Y), Math.Abs(Z))) < 1e9 &&
@@ -23,7 +24,7 @@ sealed record Sample(long Session, long Seq, double T, double RealT,
         bool Id(double v) => v >= 1 && v <= 9007199254740991 && v == Math.Truncate(v);
         if (!Id(values["s"]) || !Id(values["q"])) return null;
         var sample = new Sample((long)values["s"], (long)values["q"], values["t"], values["rt"],
-            values["x"], values["y"], values["z"], values["p"], values["yaw"], values["r"], values["spd"]);
+            values["x"], values["y"], values["z"], values["p"], values["yaw"], values["r"], values["spd"]) { Health = values["hp"] };
         return sample.Valid ? sample : null;
     }
 }

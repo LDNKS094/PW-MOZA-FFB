@@ -8,28 +8,28 @@ static class Program {
             if (args is ["--self-test"]) { await SelfTest.Run(); return 0; }
             if (args is ["--replay", var path]) { await Replay(path); return 0; }
             bool cockpit = args is ["--cockpit"] || args.Length == 0 && typeof(Program).Assembly.GetName().Name == "DCS";
-            if (args.Length != 0 && args is not ["--cockpit"]) {
-                Console.Error.WriteLine("PWBridge [--cockpit | --self-test | --replay capture.txt]"); return 2;
+            bool vibration = cockpit || args is ["--vibration-only"];
+            if (args.Length != 0 && args is not ["--cockpit"] && args is not ["--vibration-only"]) {
+                Console.Error.WriteLine("PWBridge [--cockpit | --vibration-only | --self-test | --replay capture.txt]"); return 2;
             }
             using var stop = new CancellationTokenSource();
             string directory = Path.Combine(AppContext.BaseDirectory, "captures",
                 "session-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "-" + Guid.NewGuid().ToString("N")[..8]);
-            await using var capture = new SessionCapture(directory, cockpit ? "cockpit" : "diagnostic");
+            await using var capture = new SessionCapture(directory, cockpit ? "cockpit" : vibration ? "vibration-only" : "diagnostic");
             Console.WriteLine("[capture] session: " + capture.DirectoryPath);
             using var output = cockpit ? new CockpitOutput(capture: capture) : null;
             ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; stop.Cancel(); };
             Console.CancelKeyPress += cancel;
             try {
-                Task pipe = Receive(stop.Token, output, capture, "PWTelemetry");
-                if (output == null) await pipe;
-                else {
-                    Task tcp = output.Run(stop.Token);
-                    try { Task completed = await Task.WhenAny(pipe, tcp); await completed; }
-                    finally {
-                        stop.Cancel();
-                        try { await Task.WhenAll(pipe, tcp); }
-                        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
-                    }
+                var tasks = new List<Task>();
+                tasks.Add(Receive(stop.Token, output, capture, "PWTelemetry", vibration ? NativeFeedback.OnSample : null));
+                if (output != null) tasks.Add(output.Run(stop.Token));
+                if (vibration) tasks.Add(NativeFeedback.Watch(stop.Token));
+                try { Task completed = await Task.WhenAny(tasks); await completed; }
+                finally {
+                    stop.Cancel();
+                    try { await Task.WhenAll(tasks); }
+                    catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
                 }
             } catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
             finally { Console.CancelKeyPress -= cancel; }
@@ -49,12 +49,12 @@ static class Program {
         return null;
     }
 
-    internal static async Task Receive(CancellationToken token, CockpitOutput? output, SessionCapture capture, string pipeName) {
+    internal static async Task Receive(CancellationToken token, CockpitOutput? output, SessionCapture capture, string pipeName, Action<Sample?, string?>? feedback = null) {
         var clock = Stopwatch.StartNew();
         long lastReport = -1000;
         int connection = 0;
         Console.WriteLine(output == null
-            ? "[bridge] diagnostic input recording; no Cockpit output"
+            ? feedback == null ? "[bridge] diagnostic input recording; no Cockpit output" : "[bridge] local event sampling; Cockpit output disabled"
             : $"[bridge] PW telemetry -> MOZA Cockpit; DCS port {output.Port}");
         while (!token.IsCancellationRequested) {
             using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.In, 1,
@@ -93,14 +93,16 @@ static class Program {
                         lastSession = sample.Session; lastSeq = sample.Seq; freshAt = clock.ElapsedMilliseconds;
                         frame = telemetry.Frame(sample);
                     }
+                    feedback?.Invoke(sample, line);
                     output?.Publish(frame, telemetry.Reason == "ok", inputId, sample, telemetry.Reason);
-                    if (output == null && (clock.ElapsedMilliseconds - lastReport >= 1000 || lastReason != telemetry.Reason)) {
+                    if (output == null && feedback == null && (clock.ElapsedMilliseconds - lastReport >= 1000 || lastReason != telemetry.Reason)) {
                         Console.WriteLine($"[bridge] state={telemetry.Reason} {frame}");
                         lastReport = clock.ElapsedMilliseconds; lastReason = telemetry.Reason;
                     }
                 }
             } catch (IOException ex) { endReason = "io_error"; Console.WriteLine("[pipe] " + ex.Message); }
             finally {
+                feedback?.Invoke(null, null);
                 telemetry.Reset("disconnected"); output?.Clear(endReason);
                 capture.Boundary(connection, token.IsCancellationRequested ? "shutdown" : endReason);
                 Console.WriteLine("[pipe] game mod disconnected");

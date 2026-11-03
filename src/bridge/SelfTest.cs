@@ -82,7 +82,7 @@ static class SelfTest {
             await FramingTests();
             await CockpitTests();
             await PipelineCaptureTest();
-            Console.WriteLine("PASS: telemetry math, pipe/TCP, raw-to-sent correlation, stale/shutdown recording, provenance, no-client detection; temporary captures cleaned");
+            Console.WriteLine("PASS: telemetry, pipe/TCP, capture integrity; temporary captures cleaned");
         } finally { CultureInfo.CurrentCulture = culture; }
     }
 

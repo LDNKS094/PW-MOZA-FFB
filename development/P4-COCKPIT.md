@@ -1,12 +1,16 @@
 # P4：DCS 格式遥测 → MOZA Cockpit
 
+> 当前方案：按用户最新决策，恢复既有 Cockpit 桥接负责持续杆力，重点转为接近 AC7 的震动体验。已重新发布并通过现有自检，恢复 `payload/DCS.exe`，遥测和预设未调整；未自动启动。原先“只保留源码”的阶段安排由此覆盖。新震动输出与 Cockpit 联合运行尚待单独核对效果所有权与停止，不能从各自接通推定共存完成。
+
 ## 范围
 
 ```text
 PW → 采样/校验/派生量 → DCS 格式遥测 → Cockpit → 底座
 ```
 
-bridge 只准备并发送遥测，不计算或下发底座力矩，不调用设备 SDK，不生成振动。力矩模型、强度和设备参数由 Cockpit 决定。
+当前飞行杆力通路只准备并发送遥测，不计算或下发底座力矩，不调用设备 SDK，不生成振动。力矩模型、强度和设备参数由 Cockpit 决定。
+
+P5 震动按“原生直用 → 必要接口适配 → 曲线重放”选择最小路线，不强制经过 bridge。如果游戏经 SDL Haptic 或其他接口也向 MOZA 写持续力/周期力等效果，必须先核实设备目标、效果类型和所有权，避免与 Cockpit 的力反馈争用；不能把“存在摇杆 haptic 接口”直接当成独立振动可用，也不能未经确认让两边并行写底座。原生能正确直用且共存可靠时，不额外新增一条输出链路。
 
 ## 已准备
 
@@ -40,6 +44,8 @@ bridge 只准备并发送遥测，不计算或下发底座力矩，不调用设�
 ```
 
 随后从 Steam 启动 PW。控制台出现 `[tcp] Cockpit client connected` 表示 TCP 客户端已连接；还要在 Cockpit 实测确认 PW 预设匹配和遥测解析。
+
+程序已内嵌震动模块，无参数同时运行 Cockpit 桥接与震动，无需第二个启动器。用户已决定本轮联合验收：打开 Cockpit，沿用现有 PW Default 预设，运行 `.\payload\DCS.exe`；检查持续杆力与机炮/穿云震动共存，以及加长至 800 ms 的销毁冲击。`--vibration-only` 保留用于定位共存问题。说明和预期见 [震动适配](../src/native-feedback/README.md)。
 
 注意：
 
@@ -76,8 +82,9 @@ DCS/Cockpit 模式对齐 AC7 的简洁风格，仅保留启动、管道/TCP 连�
 发布前确认 DCS.exe 已退出并备份原 `payload/DCS.exe`。先发到临时目录验证，再替换正式程序；不要覆盖运行中的程序。本轮不自动启动真实发送端。
 
 ```powershell
-dotnet build src/bridge/PWBridge.csproj -c Release
-dotnet publish src/bridge/PWBridge.csproj -c Release -r win-x64 --self-contained false -p:AssemblyName=DCS -p:PublishSingleFile=true -o payload
+cmake --build development/artifacts/pw-native-build/build --config Release
+$feedbackDll = (Resolve-Path development/artifacts/pw-native-build/build/Release/PWNativeFeedback.dll).Path
+dotnet publish src/bridge/PWBridge.csproj -c Release -r win-x64 --self-contained false -p:AssemblyName=DCS -p:PublishSingleFile=true "-p:NativeFeedbackDll=$feedbackDll" -o development/artifacts/integrated-feedback/stage
 ```
 
 发布程序名为 DCS 时无参数启用 TCP；诊断程序名 PWBridge 时保持旧的无参数诊断行为。`--self-test` / `--replay` 均不会启用正式端口。
