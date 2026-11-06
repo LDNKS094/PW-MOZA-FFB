@@ -1,0 +1,16 @@
+cmake_minimum_required(VERSION 3.24)
+project(PWVibration LANGUAGES C CXX)
+if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+  message(FATAL_ERROR "Windows x64 is required")
+endif()
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+include(FetchContent)
+FetchContent_Declare(minhook
+  GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
+  GIT_TAG c3fcafdc10146beb5919319d0683e44e3c30d537)
+FetchContent_MakeAvailable(minhook)
+add_library(PWVibration SHARED Module.cpp)
+target_link_libraries(PWVibration PRIVATE minhook dinput8 dxguid)
+target_compile_definitions(PWVibration PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(PWVibration PRIVATE /W4 /permissive- /EHsc)

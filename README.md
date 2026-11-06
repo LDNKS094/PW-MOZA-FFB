@@ -1,107 +1,180 @@
-# PW MOZA FFB：起步说明
+# PW MOZA Flight Feedback
 
-## 目标与当前结论
+English | [中文](README_zh.md)
 
-为 PC 版《Project Wingman》接入 MOZA 飞行底座的飞行力反馈与原生震动，参考本地 `../AC7-MOZA-FFB` 的实现；优先使用已有兼容能力，不预设必须捕获曲线后重放。
+Flight force feedback and vibration for Project Wingman through MOZA Cockpit and an AB6 base.
 
-**当前定位为 PW 飞行体感增强，分三块：原生震动适配、真实事件反馈增强、Cockpit 持续飞行杆力。** 用户决定恢复已有 Cockpit 桥接，其杆力已足够使用；后续重点改善震动并尽量贴近 AC7。此前固定 100 Hz 单路手感不佳，已替换为用户认可的载波方案，缺失事件基于真实游戏证据补充。
+Choose **script installation** or **manual installation**.
 
-用户已实测认可 DirectInput 双轴、60/70 ms 载波与相位续播的震动基础版，增益为 **1.5**（满幅封顶）。本轮机炮改为直接捕获三类本机炮弹完成生成，补充轻伤/重创和坠海、撞地、被击毁的一次性销毁冲击。当前为 **6 组来源、7 项测试情景**，不是 AC7 的 46 个原生分类；其中推力动态源仍待确认有效输出，详见 [覆盖清单](development/VIBRATION-COVERAGE.md)。统一入口 `payload/DCS.exe` 无参数同时负责 Cockpit 与震动，`--vibration-only` 保留单独测试。新版事件尚待实机确认；保留 150 ms 硬件保护，MTQ 搁置。独立子代理已精简旧曲线实验、P5追踪和退役观察模式。使用见 [适配说明](src/native-feedback/README.md)。
+## How it works
 
-**PW → bridge → Cockpit 恢复为持续杆力方案。** `payload/DCS.exe` 已按现有源码重新发布并通过自检，未调整遥测算法或预设，也未自动启动硬件输出。启动方式与证据见 [P4 Cockpit 接入](development/P4-COCKPIT.md)。新震动输出与 Cockpit 共用底座的效果叠加和停止仍需联合验收。
+- **Flight forces:** local flight telemetry is converted to the DCS format. Cockpit calculates the stick forces using PW Default.
+- **Vibration:** the game’s native rumble is sent to the base, with additional local cannon, damage and destruction events.
 
-桥接会把原始输入与实际 TCP 写入的完整帧、时间和状态保存到 `payload/captures/session-*/`。自动联调不作为实际底座效果或联合运行验收。详见 [实际发送帧采集](development/TELEMETRY-CAPTURE.md)。
+The bridge loads `payload/PWVibration.dll` while the game runs. The game executable and assets stay intact.
 
-实施路线、阶段验收与持续进展统一维护在 [移植计划 PLAN.md](PLAN.md)。本页保留项目背景与静态线索；实施状态以计划文档为准。
+## Install
 
-三个功能块的来源关系：
+### Requirements
+
+| Dependency | Purpose |
+| --- | --- |
+| [UE4SS 3.0.1](https://github.com/UE4SS-RE/RE-UE4SS/releases/tag/v3.0.1), x64 | Loads the telemetry script |
+| [.NET 8 Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0), Windows x64 | Runs the bridge |
+| [MOZA Cockpit](https://www.mozaracing.com/downloads/) and AB6 | Calculates flight forces and drives the base |
+
+Install these dependencies first. The standard PW layout is:
 
 ```text
-原生适配：PW 最终震动通道 → 保留包络并改善设备映射
-事件增强：真实游戏事件/状态 → 模组设计效果 → 设备输出
-飞行杆力：PW 遥测 → 既有 DCS 格式桥接 → Cockpit → 底座
+Project Wingman/ProjectWingman/Binaries/Win64/
+  ProjectWingman-Win64-Shipping.exe
+  dwmapi.dll
+  UE4SS.dll
+  Mods/
 ```
 
-先列清已确认、平台限制与未知范围，再决定接入；不先用外部模型或推测事件补齐原生效果清单。
+UE4SS may instead be inside `Win64/ue4ss/`; the scripts locate either layout.
 
-## 本地静态检查依据
+### Script install
 
-检查日期：2026-11-02。
+1. Run Cockpit once to create its preset library, then exit it.
+2. Exit PW and this project’s bridge.
+3. Run `Install.cmd`.
 
-- 游戏目录：`F:/SteamLibrary/steamapps/common/Project Wingman`
-- 主程序：`ProjectWingman/Binaries/Win64/ProjectWingman-Win64-Shipping.exe`
-- Steam App ID：`895870`；本地 manifest 的 build ID：`16671873`。
-- 主程序中发现 `++UE4+Release-4.27` 版本标记。
-- 主程序中发现 `PlayerAircraft`、`ThrottleValue`、`Health` 等名称，以及 `GetVelocity`、`ClientPlayForceFeedback`、`ForceFeedbackEffect` 等引擎接口名称。
-- 游戏包含 `SDL2.dll`，资源位于 `ProjectWingman/Content/Paks/pakchunk0-WindowsNoEditor.pak`。
+The script finds the Steam game directory, installs PWTelemetry, merges the mod lists and writes PW Default into Cockpit’s preset library. Reinstalling overwrites this project’s script and preset.
 
-这些仅说明存在可探索入口，不能证明字段归属、单位、运行时可读性，或游戏实际调用了震动接口。UE4SS 3.0.1 已通过一次加载、进任务和返回菜单；长期稳定性仍待验证。
+To select the game directory:
 
-## 参考实现与复用边界
+```powershell
+.\Install.cmd -GameDirectory 'D:\Games\Project Wingman'
+```
 
-参考项目：`../AC7-MOZA-FFB`。
+You can also pass the `ProjectWingman/Binaries/Win64` directory. Use `-WhatIf` to preview the changes.
 
-| 位置 | 用途 | PW 适配判断 |
+### Script uninstall
+
+Exit PW, Cockpit and the bridge, then run `Uninstall.cmd`. It removes PWTelemetry, its mod-list entries and this project’s Cockpit preset and match entry.
+
+```powershell
+.\Uninstall.cmd -GameDirectory 'D:\Games\Project Wingman'
+```
+
+Shared loaders, other mods, input bindings and other presets remain installed.
+
+### Manual install
+
+1. Run Cockpit once, then exit Cockpit, PW and the bridge.
+2. Copy `mod/PWTelemetry/` into the active UE4SS `Mods/` directory.
+3. Add this entry to `Mods/mods.txt`:
+
+   ```text
+   PWTelemetry : 1
+   ```
+
+4. Add this object to the array in `Mods/mods.json`, keeping existing entries:
+
+   ```json
+   { "mod_name": "PWTelemetry", "mod_enabled": true }
+   ```
+
+5. Copy `presets/{5a70e8ad-f59c-4b37-b598-2d8083691f5f}.preset` into your Documents folder’s `MOZA Cockpit/PresetLibrary/`.
+6. Add this record to the `presets` array in `PresetIndex.index`. Replace `file_path` with the actual full path:
+
+   ```json
+   {
+     "date": "1791976000",
+     "device_type": "Base",
+     "devices": ["AB6"],
+     "file_path": "C:/Users/YOUR_USER_NAME/Documents/MOZA Cockpit/PresetLibrary/{5a70e8ad-f59c-4b37-b598-2d8083691f5f}.preset",
+     "games": ["dcs_world"],
+     "name": "PW Default",
+     "product_type": "AS23",
+     "uuid": "{5a70e8ad-f59c-4b37-b598-2d8083691f5f}",
+     "vehicles": "PW Default",
+     "version": "1.0.1"
+   }
+   ```
+
+7. Add this mapping under `Base.AB6.dcs_world` in `OptimalMatch.vconfig`:
+
+   ```json
+   "PW Default": "{5a70e8ad-f59c-4b37-b598-2d8083691f5f}"
+   ```
+
+### Manual uninstall
+
+Delete `Mods/PWTelemetry/` and remove its entries from `mods.txt` and `mods.json`.
+
+In Cockpit’s preset library, delete `{5a70e8ad-f59c-4b37-b598-2d8083691f5f}.preset`, remove its UUID from `PresetIndex.index`, and remove the PW Default mapping pointing to that UUID from `OptimalMatch.vconfig`.
+
+Keep shared dependencies used by other mods.
+
+## Usage
+
+1. Open Cockpit.
+2. Run `DCS.exe`; Cockpit uses the PW Default match.
+3. Start PW.
+
+The window reports game, telemetry, Cockpit and vibration-module status when it changes. Normal status is not saved to log files. Press Ctrl+C to exit. `DCS.exe --vibration-only` enables vibration without the Cockpit connection.
+
+Restarting the bridge reconnects to the running game. The bridge also waits for the next game session after PW exits. Updating the vibration module takes effect on the next PW launch.
+
+Errors are written only when they occur: bridge errors go to `logs/`, vibration errors to `payload/`, and telemetry errors to the installed script’s `Scripts/telemetry-errors.log`.
+
+## Rumble settings
+
+Global gain is **1.5**, with the output capped at full strength. Sources use the strongest current amplitude rather than adding their strengths.
+
+| Effect | Carrier period | Envelope |
 | --- | --- | --- |
-| `mod/AC7Telemetry/Scripts/main.lua` | 游戏线程采样，经命名管道发送遥测 | 可参考结构；飞机类、字段、武器状态及单位必须重新确认 |
-| `src/bridge/FlightTelemetry.cs` | 遥测转换为 Cockpit 使用的 DCS 格式 | 既有杆力桥接使用，算法不改 |
-| `src/bridge/Program.cs` | PW 遥测、Cockpit 和震动生命周期 | DCS.exe 统一入口，支持仅震动模式 |
-| `src/bridge/RumbleCarrier.cs`、`Vibration.cs` | 振动输出相关逻辑 | 核对协议与设备后评估复用 |
-| `src/rumble/observer.cpp`、`preview.cpp` | 捕获并重建 AC7 原生震动 | 函数地址、对象布局是 AC7 专属，不能直接用于 PW |
+| Native rumble | 60/70 ms | Game-controlled |
+| Cannon | 28 ms | 80 ms decay, refreshed by each shot |
+| Light damage | 35 ms | 200 ms decay |
+| Heavy damage | 80 ms | 200 ms peak hold + 600 ms decay |
+| Destruction | 80 ms | 200 ms full-strength hold + 600 ms decay |
 
-现有 AC7 Lua 还依赖 `/Script/Nimbus.PlayerPlane` 等专属类型，不能直接复制运行。共享协议不代表所有字段都可在 PW 中获得，未验证字段不得伪装成真实遥测。
+Heavy damage starts at a single health loss of 20% of the previous health value; its strength follows the loss ratio. Parameters are compiled into the program. Rebuild to change them.
 
-桥接的投影、滤波与字段映射改编自 GPL-3.0 的 AC7 项目，本项目代码按根目录 [LICENSE](LICENSE) 提供。UE4SS 等第三方组件遵守其各自条款；本仓库忽略下载包和用户数据备份。
+Pausing, leaving the game window or exiting the bridge stops vibration. Hardware requests retain a 150 ms expiration limit.
 
-## 历史阶段：遥测/Cockpit 杆力链路（现仅保留代码）
+## Key bindings
 
-以下为此前验证步骤与标准，不作为当前启动或测试指引。
+Bind controller axes and buttons in PW’s control settings. Cockpit’s preset controls flight forces; PW’s bindings control in-game actions. Installation keeps `Input.ini` intact.
 
-1. 确认适用于本地 PW 版本的加载方式，验证 UE4SS 是否能启动并获取玩家 Controller / Pawn。
-2. 只读采集速度、姿态及时间间隔；记录实际对象类型，核实速度来源、单位与坐标系。
-3. 确认菜单、加载、暂停、死亡、换机、退出时如何识别“无有效飞行状态”。
-4. 将必要数据接入现有遥测桥接，先检查日志及输出数值，再连接硬件。
-5. 使用低力矩预设，确认速度变化和机动能产生方向正确、连续的杆力响应。
+## Known limitations
 
-### 验收标准
+- Vibration output targets one MOZA AB6 base. All aircraft use PW Default.
+- The native module supports the verified Steam Windows game build; game updates may require adaptation.
+- Native dynamic sources share mixed channels, so they cannot be tuned using AC7’s individual effect IDs.
 
-- 能稳定区分玩家飞机与非飞行状态，不误读 AI 或菜单展示机。
-- 遥测数值有限、单位明确，姿态跨越 ±180° 时不会产生异常尖峰。
-- 暂停、失联、异常、退出时输出及时归零或回到已定义的安全状态。
-- 重进任务后可恢复，无须沿用失效对象地址。
-- 限力测试时无突发满力、持续残留或明显方向反转。
+## Building from source
 
-以上通过后，才认定最小可用架构成立。
+Requirements: .NET 8 SDK, x64 MSVC and CMake.
 
-## 后续：振动接入
+Run from the project directory:
 
-固定优先级：**原生直用 → 必要接口适配 → 曲线重放**，不先做事件合成。
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
+```
 
-1. **先查能否直用**：确认游戏实际调用、目标设备、效果类型、MOZA 执行能力及停止行为。如果能正确直驱且不与 Cockpit 冲突，直接使用，不新增 bridge 振动后端或重放系统。
-2. **不兼容才适配**：若已有原生输出但设备/协议不兼容，优先转接已生成的请求或输出；有明确阻塞证据时才考虑从原始曲线重放。已有离线模型是候选技术，不是必须接入的功能。
-3. **整体验收**：针对已确认的原生来源统一验证自然结束、暂停/死亡/失联/退出停止和重连恢复；持续杆力单独列证据，不用旧计算混入原生验收，不按每个字段反复试飞。
+Compiled output:
 
-只有原生来源确实不可用时，才与用户确认是否退回真实事件合成；不把按钮或遥测推断偷偷当作原生手柄震动。
+```text
+DCS.exe
+payload/
+  PWVibration.dll
+```
 
-XInput 主要对应 Xbox 兼容手柄，ScePad 对应 PlayStation 手柄；SDL Haptic 是通用触觉/力反馈接口。最新实机中，8 次导弹对应 8 段引擎最终非零震动，随后归零；AB6 可执行启动自检，飞行中却没有 SDL 输出。已定位平台分发门控与摇杆插件空接收槽，下一步补必要输出适配；不把动态马达震动当作方向性飞行杆力。证据与接入思路见 [P5 原生震动调查](development/P5-NATIVE-RUMBLE.md)。
+`DCS.exe` loads the native vibration module from `payload/PWVibration.dll`. Build intermediates and publish staging stay under `development/`. After building, follow the installation instructions above.
 
-## 安全与范围
+To package the current build:
 
-- 开发时先使用日志或模拟输出；首次硬件验证限制力矩，确保可随时断开输出。
-- 必须有断流超时、有限数值检查、异常限幅及安全复位。
-- 加载器或配置修改前备份原文件，不直接覆写游戏 EXE 或资源包。
-- 不复用 AC7 的函数地址或内存偏移，不在未验证布局上尝试 Hook。
-- 游戏更新可能破坏反射、签名及字段布局，需要重新验证。
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Package.ps1
+```
 
-当前不做：完整逆向、按键扩展、安装器、分机型预设、云层/结冰等附加效果，以及与本次目标无关的重构。
+This creates `releases/PW-MOZA-FFB-<version>.zip` and its `.sha256` file. The archive contains the bridge, vibration module, mod, preset, installation scripts, both READMEs and licenses.
 
-## 实施进度
+## License
 
-执行计划统一见 [PLAN.md](PLAN.md)：**确认两类原生效果范围与最小适配 → 覆盖与稳定性 → 整理发布**。按可交付版本集中验收，不再把字段/曲线/协议细节拆成多轮用户测试。`development/` 保留技术与历史证据，不作为并行待办清单。
-
-## 官方与社区线索
-
-- MOZA 游戏支持列表：<https://support.mozaracing.com/en/support/solutions/articles/70000679082-game-support>
-- OpenFlight PW 说明：<https://github.com/EffortlessMetrics/OpenFlight/blob/main/docs/how-to/wingman-setup.md>
-
-此前检索未找到经验证的 PW 专用 MOZA FFB 插件。此结论并非穷尽性检索，也不代表不能通过本地模组实现。
+This project is licensed under [GPL-3.0](LICENSE). Telemetry mapping, vibration policy and deployment handling draw on the GPL-3.0 AC7-MOZA-FFB reference. MinHook retains its [full license and bundled disassembler notices](licenses/MinHook-LICENSE.txt).

@@ -1,16 +1,10 @@
-# Local third-party downloads, user data backups, and runtime evidence.
-reference/
-
-development/ue4ss/
-development/input-backups/
-development/save-backups/
-development/cockpit-backups/
-development/deployments/
-development/artifacts/
+# Local reference, development documents/evidence, and generated packages.
+/reference/
+/development/
 *.log
 *.dmp
 **/bin/
 **/obj/
-payload/
-# Local read-only reference copy.
-/reference/
+/DCS.exe
+/payload/
+/releases/
