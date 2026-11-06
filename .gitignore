@@ -1,6 +1,7 @@
 # Local reference, development documents/evidence, and generated packages.
 /reference/
 /development/
+/log/
 *.log
 *.dmp
 **/bin/

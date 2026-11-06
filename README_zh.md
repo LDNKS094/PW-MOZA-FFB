@@ -11,7 +11,7 @@
 - **飞行力反馈**：采集本机飞行遥测，转换为 DCS 格式，由 Cockpit App 计算杆力。
 - **震动**：转接游戏原生震动，并补充本机机炮、受损和销毁事件。
 
-桥接程序在游戏运行时加载 `payload/PWVibration.dll`，游戏 EXE 和资源文件保持原样。
+桥接程序在游戏运行时加载震动模块，游戏 EXE 和资源文件保持原样。
 
 ## 安装
 
@@ -60,6 +60,8 @@ UE4SS 也可以位于 `Win64/ue4ss/`，脚本会识别这两种布局。
 ```
 
 ### 手动安装
+
+将 `payload/PWVibration.dll` 复制到游戏 EXE 所在目录。DLL 的加载本身和游戏目录没有绑定关系，但为了方便管理，本项目统一放在游戏目录中。
 
 1. 运行一次 Cockpit，以生成预设库，然后退出。
 2. 将 `mod/PWTelemetry/` 复制到当前 UE4SS 的 `Mods/` 目录。
@@ -139,7 +141,7 @@ payload/
   PWVibration.dll
 ```
 
-`DCS.exe` 从 `payload/PWVibration.dll` 加载原生震动模块。构建中间文件和发布暂存集中在 `development/`。编译后即可按照常规安装方式使用。
+编译后即可按照常规安装方式使用。
 
 ## 许可证
 

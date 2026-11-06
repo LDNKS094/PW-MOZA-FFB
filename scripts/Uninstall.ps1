@@ -9,7 +9,9 @@ $state = Get-PresetState
 if ($state.Index) { $state.Index.presets = @($state.Index.presets | Where-Object { $_.uuid -ne $PresetUuid }) }
 $mapping = if ($state.Match -and $state.Match.Base -and $state.Match.Base.AB6) { $state.Match.Base.AB6.dcs_world } else { $null }
 if ($mapping -and $mapping.PSObject.Properties['PW Default'] -and $mapping.'PW Default' -eq $PresetUuid) { $mapping.PSObject.Properties.Remove('PW Default') }
-if (-not $PSCmdlet.ShouldProcess("$game; $($state.Library)", 'Remove PWTelemetry and this project Cockpit preset')) { return }
+if (-not $PSCmdlet.ShouldProcess("$game; $($state.Library)", 'Remove PWVibration, PWTelemetry and this project Cockpit preset')) { return }
+$module = Join-Path $game 'PWVibration.dll'
+if (Test-Path -LiteralPath $module) { Remove-Item -LiteralPath $module }
 $telemetry = [IO.Path]::GetFullPath((Join-Path $mods 'PWTelemetry'))
 if (-not $telemetry.StartsWith($game + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Telemetry path is outside the selected game directory.' }
 if (Test-Path -LiteralPath $telemetry) { Remove-Item -LiteralPath $telemetry -Recurse -Force }
@@ -22,4 +24,4 @@ if (Test-Path -LiteralPath $mods) {
 $presetPath = Join-Path $state.Library "$PresetUuid.preset"
 if (Test-Path -LiteralPath $presetPath) { Remove-Item -LiteralPath $presetPath }
 Write-PresetState $state
-Write-Output 'Removed PWTelemetry and PW Default.'
+Write-Output 'Removed PWVibration, PWTelemetry and PW Default.'

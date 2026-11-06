@@ -26,8 +26,6 @@ static class VibrationHost {
     static string Name(string kind, int pid) => $@"Local\PWVibration-{kind}-{pid}";
 
     public static async Task Watch(CancellationToken token) {
-        string dll = Path.Combine(AppContext.BaseDirectory, "payload", DllName);
-        if (!File.Exists(dll)) throw new FileNotFoundException("Vibration module file missing", dll);
         Console.WriteLine("[game] Waiting for Project Wingman...");
         while (!token.IsCancellationRequested) {
             Process[] processes = Process.GetProcessesByName(Game);
@@ -35,7 +33,7 @@ static class VibrationHost {
                 if (processes.Length != 1) { await Task.Delay(500, token); continue; }
                 Process game = processes[0];
                 Console.WriteLine($"[game] PW PID {game.Id}; preparing vibration module.");
-                try { await AttachAndWait(game, dll, token); }
+                try { await AttachAndWait(game, token); }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                 catch (Exception error) { if (!game.HasExited) ErrorLog.Write("Vibration connection failed", error); }
                 if (!game.HasExited) await game.WaitForExitAsync(token);
@@ -56,12 +54,15 @@ static class VibrationHost {
             await Task.Delay(10, token);
         }
     }
-    static async Task AttachAndWait(Process game, string dll, CancellationToken token) {
+    static async Task AttachAndWait(Process game, CancellationToken token) {
         while (!game.HasExited && game.MainWindowHandle == 0) {
             await Task.Delay(200, token);
             game.Refresh();
         }
         if (game.HasExited) return;
+        string image = game.MainModule?.FileName ?? throw new IOException("PW executable path lookup failed");
+        string dll = Path.Combine(Path.GetDirectoryName(image)!, DllName);
+        if (!File.Exists(dll)) throw new FileNotFoundException($"Vibration module file missing: {dll}", dll);
         using var launchLock = new Semaphore(1, 1, Name("Attach", game.Id));
         if (!launchLock.WaitOne(0)) throw new IOException("Vibration connection is owned by another bridge");
         try { await AttachOwned(game, dll, token); }

@@ -10,7 +10,8 @@ foreach ($dependency in @((Join-Path $game 'dwmapi.dll'), $ue4ss)) {
 }
 $scriptSource = Join-Path $ProjectRoot 'mod\PWTelemetry\Scripts\main.lua'
 $presetSource = Join-Path $ProjectRoot "presets\$PresetUuid.preset"
-foreach ($source in @($scriptSource, $presetSource, (Join-Path $ProjectRoot 'DCS.exe'), (Join-Path $ProjectRoot 'payload\PWVibration.dll'))) {
+$moduleSource = Join-Path $ProjectRoot 'payload\PWVibration.dll'
+foreach ($source in @($scriptSource, $presetSource, (Join-Path $ProjectRoot 'DCS.exe'), $moduleSource)) {
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing package file: $source" }
 }
 $lists = Get-ModLists $mods $true
@@ -34,7 +35,9 @@ $entry = [pscustomobject]@{ date = $preset.date; device_type = $preset.device_ty
     file_path = $destination.Replace('\', '/'); games = @($preset.games); name = $preset.name
     product_type = $preset.product_type; uuid = $PresetUuid; vehicles = $preset.vehicles; version = $preset.version }
 $state.Index.presets = @($state.Index.presets | Where-Object { $_.uuid -ne $PresetUuid }) + @($entry)
-if (-not $PSCmdlet.ShouldProcess("$game; $($state.Library)", 'Install PWTelemetry and overwrite the PW Default Cockpit preset')) { return }
+if (-not $PSCmdlet.ShouldProcess("$game; $($state.Library)", 'Install PWVibration, PWTelemetry and the PW Default Cockpit preset')) { return }
+$moduleDestination = Join-Path $game 'PWVibration.dll'
+Copy-Item -LiteralPath $moduleSource -Destination $moduleDestination -Force
 $target = Join-Path $mods 'PWTelemetry\Scripts'
 New-Item -ItemType Directory -Path $target -Force | Out-Null
 Copy-Item -LiteralPath $scriptSource -Destination (Join-Path $target 'main.lua') -Force
@@ -42,6 +45,7 @@ Write-Utf8 (Join-Path $mods 'mods.txt') $lists.Text
 Write-Utf8 (Join-Path $mods 'mods.json') $lists.Json
 Copy-Item -LiteralPath $presetSource -Destination $destination -Force
 Write-PresetState $state
+Write-Output "Installed PWVibration: $moduleDestination"
 Write-Output "Installed PWTelemetry: $mods"
 Write-Output "Installed PW Default: $destination"
 Write-Output 'Open Cockpit, run DCS.exe, then start Project Wingman.'
